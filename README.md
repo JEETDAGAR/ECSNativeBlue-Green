@@ -176,21 +176,108 @@ The traffic switching is **automatically handled by ECS** using this configurati
 ```
 
 ### **ECS Automatically:**
-1. **Deploys new tasks** to Green Target Group
+1. **Deploys new tasks** to alternate target group (Green)
 2. **Tests via lifecycle hooks** on port 8080
-3. **Modifies ALB listener rule** to point to Green Target Group
-4. **Switches production traffic** from Blue to Green
+3. **Modifies ALB listener rule** using weighted target groups
+4. **Switches production traffic** from Blue (0% weight) to Green (100% weight)
 5. **Drains old tasks** from Blue Target Group
 
-### **AWS API Call Made by ECS:**
+### **How ALB Weighted Target Groups Work:**
+
 ```bash
-# ECS automatically executes this during deployment:
+# ECS modifies the listener rule to use weighted target groups:
 aws elbv2 modify-rule \
   --rule-arn "PRODUCTION_LISTENER_RULE_ARN" \
-  --actions Type=forward,TargetGroupArn="GREEN_TARGET_GROUP_ARN"
+  --actions Type=forward,ForwardConfig='{
+    "TargetGroups": [
+      {"TargetGroupArn": "BLUE_TARGET_GROUP_ARN", "Weight": 0},
+      {"TargetGroupArn": "GREEN_TARGET_GROUP_ARN", "Weight": 100}
+    ]
+  }'
 ```
 
-**You don't manually configure ALB - ECS orchestrates everything!**
+### **Important: AWS Console Display vs Reality**
+
+**What AWS Console Shows:**
+```
+HTTP:80   → bluegreen-demo-blue (100%)    ← Default action (fallback)
+HTTP:8080 → bluegreen-demo-green (100%)   ← Direct routing
+```
+
+**What Actually Happens (Priority Rule Overrides Default):**
+```
+HTTP:80 Priority Rule:
+├── Blue Target Group: Weight 0%    ← No traffic
+└── Green Target Group: Weight 100% ← All production traffic ✅
+
+HTTP:8080 Default Rule:
+└── Green Target Group: Weight 100% ← Test traffic ✅
+```
+
+### **Blue/Green Alternating Pattern:**
+
+1. **First Deployment**: Blue → Green
+   - Production traffic: Green (100%), Blue (0%)
+   - Tasks running in: Green Target Group
+
+2. **Second Deployment**: Green → Blue  
+   - Production traffic: Blue (100%), Green (0%)
+   - Tasks running in: Blue Target Group
+
+3. **Third Deployment**: Blue → Green (cycle repeats)
+
+**You don't manually configure ALB - ECS orchestrates everything using weighted target groups!**
+
+## 🔍 Troubleshooting: Console Display vs Reality
+
+### **Common Confusion: "My deployment looks wrong in the console!"**
+
+**What you might see in AWS Console:**
+```
+Load Balancer Listeners:
+├── HTTP:80   → bluegreen-demo-blue (100%)   ← Looks like Blue is active
+└── HTTP:8080 → bluegreen-demo-green (100%)  ← Green has tasks
+```
+
+**But when you test the URLs:**
+```bash
+curl http://my-alb.amazonaws.com      # Returns: "Green Environment v2.0" ✅
+curl http://my-alb.amazonaws.com:8080 # Returns: "Green Environment v2.0" ✅
+```
+
+### **Why This Happens:**
+
+The AWS Console shows the **default listener action**, but ECS uses **weighted target group rules** that override the default:
+
+```json
+{
+  "Priority": "1",
+  "Actions": {
+    "Type": "forward",
+    "ForwardConfig": {
+      "TargetGroups": [
+        {"TargetGroupArn": "BLUE_TG", "Weight": 0},    ← No traffic
+        {"TargetGroupArn": "GREEN_TG", "Weight": 100}  ← All traffic
+      ]
+    }
+  }
+}
+```
+
+### **How to Verify Actual Traffic Routing:**
+
+```bash
+# Check the weighted target group configuration
+aws elbv2 describe-rules \
+  --listener-arn "YOUR_LISTENER_ARN" \
+  --query 'Rules[?Priority==`1`].Actions[0].ForwardConfig.TargetGroups'
+
+# Test the actual traffic routing
+curl http://your-alb-dns-name        # Should show the active environment
+curl http://your-alb-dns-name:8080   # Should show the same environment after deployment
+```
+
+**Remember: The console display can be misleading - always test the actual URLs to verify traffic routing!**
 
 ## 🧹 Cleanup
 

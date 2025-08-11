@@ -286,7 +286,12 @@ Resources:
     Properties:
       DefaultActions:
         - Type: forward
-          TargetGroupArn: !Ref BlueTargetGroup
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref BlueTargetGroup
+                Weight: 100
+              - TargetGroupArn: !Ref GreenTargetGroup
+                Weight: 0
       LoadBalancerArn: !Ref ApplicationLoadBalancer
       Port: 80
       Protocol: HTTP
@@ -301,13 +306,18 @@ Resources:
       Port: 8080
       Protocol: HTTP
 
-  # Listener Rules
+  # Listener Rules for Blue/Green
   ProductionListenerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
       Actions:
         - Type: forward
-          TargetGroupArn: !Ref BlueTargetGroup
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref BlueTargetGroup
+                Weight: 100
+              - TargetGroupArn: !Ref GreenTargetGroup
+                Weight: 0
       Conditions:
         - Field: path-pattern
           Values: ["/*"]

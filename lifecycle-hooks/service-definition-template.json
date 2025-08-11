@@ -53,6 +53,7 @@
       "advancedConfiguration": {
         "alternateTargetGroupArn": "GREEN_TARGET_GROUP_ARN",
         "productionListenerRule": "PRODUCTION_LISTENER_RULE_ARN",
+        "testListenerRule": "TEST_LISTENER_RULE_ARN",
         "roleArn": "ECS_BLUE_GREEN_ROLE_ARN"
       }
     }

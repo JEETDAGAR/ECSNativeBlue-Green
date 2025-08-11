@@ -78,6 +78,7 @@ CLUSTER_NAME=$(aws cloudformation describe-stacks --region $REGION --stack-name 
 BLUE_TG_ARN=$(aws cloudformation describe-stacks --region $REGION --stack-name $STACK_NAME --query 'Stacks[0].Outputs[?OutputKey==`BlueTargetGroupArn`].OutputValue' --output text)
 GREEN_TG_ARN=$(aws cloudformation describe-stacks --region $REGION --stack-name $STACK_NAME --query 'Stacks[0].Outputs[?OutputKey==`GreenTargetGroupArn`].OutputValue' --output text)
 PROD_RULE_ARN=$(aws cloudformation describe-stacks --region $REGION --stack-name $STACK_NAME --query 'Stacks[0].Outputs[?OutputKey==`ProductionListenerRuleArn`].OutputValue' --output text)
+TEST_RULE_ARN=$(aws cloudformation describe-stacks --region $REGION --stack-name $STACK_NAME --query 'Stacks[0].Outputs[?OutputKey==`TestListenerRuleArn`].OutputValue' --output text)
 BG_ROLE_ARN=$(aws cloudformation describe-stacks --region $REGION --stack-name $STACK_NAME --query 'Stacks[0].Outputs[?OutputKey==`ECSBlueGreenRoleArn`].OutputValue' --output text)
 LAMBDA_ARN=$(aws cloudformation describe-stacks --region $REGION --stack-name $STACK_NAME --query 'Stacks[0].Outputs[?OutputKey==`LambdaFunctionArn`].OutputValue' --output text)
 TASK_DEF_ARN=$(aws cloudformation describe-stacks --region $REGION --stack-name $STACK_NAME --query 'Stacks[0].Outputs[?OutputKey==`TaskDefinitionArn`].OutputValue' --output text)
@@ -139,6 +140,7 @@ cat > lifecycle-hooks/service-definition.json << EOF
       "advancedConfiguration": {
         "alternateTargetGroupArn": "$GREEN_TG_ARN",
         "productionListenerRule": "$PROD_RULE_ARN",
+        "testListenerRule": "$TEST_RULE_ARN",
         "roleArn": "$BG_ROLE_ARN"
       }
     }

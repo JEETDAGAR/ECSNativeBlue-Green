@@ -152,6 +152,46 @@ curl http://my-alb.amazonaws.com:8080 # Returns: "Green Environment v2.0"
 # This proves zero-downtime: production never stops!
 ```
 
+## 🔄 How Does ALB Switch Traffic?
+
+### **The Key: ECS Service `advancedConfiguration`**
+
+The traffic switching is **automatically handled by ECS** using this configuration:
+
+```json
+{
+  "loadBalancers": [
+    {
+      "targetGroupArn": "BLUE_TARGET_GROUP_ARN",
+      "containerName": "demo-app", 
+      "containerPort": 80,
+      "advancedConfiguration": {
+        "alternateTargetGroupArn": "GREEN_TARGET_GROUP_ARN",
+        "productionListenerRule": "PRODUCTION_LISTENER_RULE_ARN",
+        "roleArn": "ECS_BLUE_GREEN_ROLE_ARN"
+      }
+    }
+  ]
+}
+```
+
+### **ECS Automatically:**
+1. **Deploys new tasks** to Green Target Group
+2. **Tests via lifecycle hooks** on port 8080
+3. **Modifies ALB listener rule** to point to Green Target Group
+4. **Switches production traffic** from Blue to Green
+5. **Drains old tasks** from Blue Target Group
+
+### **AWS API Call Made by ECS:**
+```bash
+# ECS automatically executes this during deployment:
+aws elbv2 modify-rule \
+  --rule-arn "PRODUCTION_LISTENER_RULE_ARN" \
+  --actions Type=forward,TargetGroupArn="GREEN_TARGET_GROUP_ARN"
+```
+
+**You don't manually configure ALB - ECS orchestrates everything!**
+
 ## 🧹 Cleanup
 
 ```bash

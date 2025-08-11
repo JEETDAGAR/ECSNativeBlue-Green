@@ -1,0 +1,60 @@
+{
+  "serviceName": "STACK_NAME-service",
+  "cluster": "STACK_NAME-cluster",
+  "taskDefinition": "STACK_NAME-task:1",
+  "desiredCount": 2,
+  "launchType": "FARGATE",
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": [
+        "SUBNET_ID_1",
+        "SUBNET_ID_2"
+      ],
+      "securityGroups": [
+        "ECS_SECURITY_GROUP_ID"
+      ],
+      "assignPublicIp": "ENABLED"
+    }
+  },
+  "deploymentController": {
+    "type": "ECS"
+  },
+  "deploymentConfiguration": {
+    "strategy": "BLUE_GREEN",
+    "maximumPercent": 200,
+    "minimumHealthyPercent": 100,
+    "bakeTimeInMinutes": 2,
+    "deploymentCircuitBreaker": {
+      "enable": true,
+      "rollback": true
+    },
+    "lifecycleHooks": [
+      {
+        "hookTargetArn": "LAMBDA_FUNCTION_ARN",
+        "roleArn": "ECS_BLUE_GREEN_ROLE_ARN",
+        "lifecycleStages": [
+          "POST_TEST_TRAFFIC_SHIFT"
+        ]
+      },
+      {
+        "hookTargetArn": "LAMBDA_FUNCTION_ARN",
+        "roleArn": "ECS_BLUE_GREEN_ROLE_ARN",
+        "lifecycleStages": [
+          "PRODUCTION_TRAFFIC_SHIFT"
+        ]
+      }
+    ]
+  },
+  "loadBalancers": [
+    {
+      "targetGroupArn": "BLUE_TARGET_GROUP_ARN",
+      "containerName": "demo-app",
+      "containerPort": 80,
+      "advancedConfiguration": {
+        "alternateTargetGroupArn": "GREEN_TARGET_GROUP_ARN",
+        "productionListenerRule": "PRODUCTION_LISTENER_RULE_ARN",
+        "roleArn": "ECS_BLUE_GREEN_ROLE_ARN"
+      }
+    }
+  ]
+}

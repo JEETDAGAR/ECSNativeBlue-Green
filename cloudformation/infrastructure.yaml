@@ -1,0 +1,394 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECS Native Blue/Green Deployment with Lifecycle Hooks - Complete Infrastructure'
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for the deployment
+    Default: vpc-0d0d50dd9874861fd
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs for ECS tasks (minimum 2)
+    Default: "subnet-0f5117f3d913a3f24,subnet-031621fca876e52c7"
+  ImageUri:
+    Type: String
+    Description: ECR image URI for the application
+    Default: "965990104809.dkr.ecr.us-east-2.amazonaws.com/ecs-bluegreen-demo:v1.0"
+
+Resources:
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${AWS::StackName}-cluster"
+
+  # IAM Roles
+  ECSExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-ECSExecutionRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-LambdaExecutionRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ECSLifecycleHookPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:DescribeServices
+                  - ecs:DescribeTasks
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # ECS Blue/Green Role
+  ECSBlueGreenRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-ECSBlueGreenRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ECSBlueGreenPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:ModifyListener
+                  - elasticloadbalancing:DescribeListeners
+                  - elasticloadbalancing:ModifyRule
+                  - elasticloadbalancing:DescribeRules
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetHealth
+                  - elasticloadbalancing:ModifyTargetGroup
+                  - elasticloadbalancing:ModifyTargetGroupAttributes
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                  - lambda:InvokeFunction
+                Resource: '*'
+
+  # Lifecycle Hook Lambda Function
+  LifecycleHookFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-lifecycle-hook"
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      Environment:
+        Variables:
+          TEST_ENDPOINT_URL: !Sub "http://${ApplicationLoadBalancer.DNSName}:8080"
+          PRODUCTION_ENDPOINT_URL: !Sub "http://${ApplicationLoadBalancer.DNSName}"
+      Code:
+        ZipFile: |
+          import json
+          import urllib3
+          import logging
+          import os
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          http = urllib3.PoolManager()
+          
+          def lambda_handler(event, context):
+              logger.info("=== ECS Deployment Lifecycle Hook Triggered ===")
+              logger.info(f"Event payload: {json.dumps(event, indent=2)}")
+              
+              try:
+                  service_arn = event.get('serviceArn')
+                  target_service_revision_arn = event.get('targetServiceRevisionArn')
+                  test_traffic_weights = event.get('testTrafficWeights', {})
+                  production_traffic_weights = event.get('productionTrafficWeights', {})
+                  
+                  logger.info(f"Service ARN: {service_arn}")
+                  logger.info(f"Target revision ARN: {target_service_revision_arn}")
+                  
+                  # Get test endpoint URL
+                  test_endpoint = os.getenv('TEST_ENDPOINT_URL')
+                  if not test_endpoint:
+                      logger.error("TEST_ENDPOINT_URL environment variable not set")
+                      return {"hookStatus": "FAILED"}
+                  
+                  logger.info(f"Testing endpoint: {test_endpoint}")
+                  
+                  # Health check
+                  health_response = http.request('GET', f"{test_endpoint}/health", timeout=10)
+                  logger.info(f"Health check response: {health_response.status}")
+                  
+                  if health_response.status != 200:
+                      logger.error(f"Health check failed with status: {health_response.status}")
+                      return {"hookStatus": "FAILED"}
+                  
+                  # Main application test
+                  main_response = http.request('GET', test_endpoint, timeout=10)
+                  logger.info(f"Main endpoint response: {main_response.status}")
+                  
+                  if main_response.status != 200:
+                      logger.error(f"Main endpoint test failed with status: {main_response.status}")
+                      return {"hookStatus": "FAILED"}
+                  
+                  # Check response content
+                  response_body = main_response.data.decode('utf-8')
+                  if 'ECS Native Blue-Green Deployment' not in response_body:
+                      logger.error("Response does not contain expected application content")
+                      return {"hookStatus": "FAILED"}
+                  
+                  logger.info("✅ All validation tests passed successfully!")
+                  return {"hookStatus": "SUCCEEDED"}
+                  
+              except Exception as error:
+                  logger.error(f"Validation failed with error: {str(error)}")
+                  return {"hookStatus": "FAILED"}
+
+  # Lambda Permission for ECS
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LifecycleHookFunction
+      Action: lambda:InvokeFunction
+      Principal: ecs.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+
+  # Task Definition
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${AWS::StackName}-task"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: 256
+      Memory: 512
+      ExecutionRoleArn: !Ref ECSExecutionRole
+      ContainerDefinitions:
+        - Name: demo-app
+          Image: !Ref ImageUri
+          PortMappings:
+            - ContainerPort: 80
+          Environment:
+            - Name: APP_VERSION
+              Value: v1.0
+            - Name: ENVIRONMENT
+              Value: Blue
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CloudWatchLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  # CloudWatch Log Group
+  CloudWatchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${AWS::StackName}"
+      RetentionInDays: 7
+
+  # Security Groups
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB Security Group
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS Security Group
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+
+  # Application Load Balancer
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "${AWS::StackName}-alb"
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Ref SubnetIds
+      SecurityGroups: [!Ref ALBSecurityGroup]
+
+  # Target Groups
+  BlueTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${AWS::StackName}-blue"
+      Port: 80
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  GreenTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${AWS::StackName}-green"
+      Port: 80
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  # Listeners
+  ProductionListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref BlueTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  TestListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref GreenTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 8080
+      Protocol: HTTP
+
+  # Listener Rules
+  ProductionListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref BlueTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values: ["/*"]
+      ListenerArn: !Ref ProductionListener
+      Priority: 1
+
+  TestListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref GreenTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values: ["/*"]
+      ListenerArn: !Ref TestListener
+      Priority: 1
+
+Outputs:
+  ClusterName:
+    Description: ECS Cluster Name
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterName"
+  
+  LoadBalancerDNS:
+    Description: Load Balancer DNS Name
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub "${AWS::StackName}-LoadBalancerDNS"
+  
+  ProductionURL:
+    Description: Production URL (Port 80)
+    Value: !Sub "http://${ApplicationLoadBalancer.DNSName}"
+    Export:
+      Name: !Sub "${AWS::StackName}-ProductionURL"
+  
+  TestURL:
+    Description: Test URL (Port 8080)
+    Value: !Sub "http://${ApplicationLoadBalancer.DNSName}:8080"
+    Export:
+      Name: !Sub "${AWS::StackName}-TestURL"
+  
+  BlueTargetGroupArn:
+    Description: Blue Target Group ARN
+    Value: !Ref BlueTargetGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-BlueTargetGroupArn"
+  
+  GreenTargetGroupArn:
+    Description: Green Target Group ARN
+    Value: !Ref GreenTargetGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-GreenTargetGroupArn"
+  
+  ProductionListenerRuleArn:
+    Description: Production Listener Rule ARN
+    Value: !Ref ProductionListenerRule
+    Export:
+      Name: !Sub "${AWS::StackName}-ProductionListenerRuleArn"
+  
+  TestListenerRuleArn:
+    Description: Test Listener Rule ARN
+    Value: !Ref TestListenerRule
+    Export:
+      Name: !Sub "${AWS::StackName}-TestListenerRuleArn"
+  
+  ECSBlueGreenRoleArn:
+    Description: ECS Blue/Green Role ARN
+    Value: !GetAtt ECSBlueGreenRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ECSBlueGreenRoleArn"
+  
+  LambdaFunctionArn:
+    Description: Lifecycle Hook Lambda Function ARN
+    Value: !GetAtt LifecycleHookFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaFunctionArn"
+  
+  TaskDefinitionArn:
+    Description: Task Definition ARN
+    Value: !Ref TaskDefinition
+    Export:
+      Name: !Sub "${AWS::StackName}-TaskDefinitionArn"

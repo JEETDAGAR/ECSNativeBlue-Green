@@ -1,0 +1,38 @@
+{
+  "family": "bluegreen-final-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::965990104809:role/bluegreen-final-ECSExecutionRole-sgzpdVJJfrsg",
+  "containerDefinitions": [
+    {
+      "name": "demo-app",
+      "image": "965990104809.dkr.ecr.us-east-2.amazonaws.com/ecs-bluegreen-demo:v1.0",
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "APP_VERSION",
+          "value": "v3.0"
+        },
+        {
+          "name": "ENVIRONMENT",
+          "value": "Green"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/bluegreen-final",
+          "awslogs-region": "us-east-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

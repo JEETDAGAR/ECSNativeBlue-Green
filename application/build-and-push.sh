@@ -26,7 +26,13 @@ docker tag ${REPO_NAME}:${VERSION} ${ECR_URI}:${VERSION}
 docker tag ${REPO_NAME}:${VERSION} ${ECR_URI}:latest
 
 echo "Logging into ECR..."
-aws ecr get-login-password --profile jeet --region ${REGION} | docker login --username AWS --password-stdin ${ECR_URI}
+aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin ${ECR_URI}
+
+echo "Pushing image to ECR..."
+docker push ${ECR_URI}:${VERSION}
+docker push ${ECR_URI}:latest
+
+echo "✅ Successfully pushed ${ECR_URI}:${VERSION}"
 
 echo "Pushing image to ECR..."
 docker push ${ECR_URI}:${VERSION}

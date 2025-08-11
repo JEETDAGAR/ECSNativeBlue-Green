@@ -4,11 +4,11 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "256",
   "memory": "512",
-  "executionRoleArn": "arn:aws:iam::YOUR_ACCOUNT_ID:role/ecs-bluegreen-demo-ECSExecutionRole",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecs-bluegreen-demo-ECSExecutionRole",
   "containerDefinitions": [
     {
       "name": "demo-app",
-      "image": "YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com/ecs-bluegreen-demo:v2.0",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/ecs-bluegreen-demo:v2.0",
       "portMappings": [
         {
           "containerPort": 80,
@@ -29,7 +29,7 @@
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/ecs-bluegreen-demo",
-          "awslogs-region": "YOUR_REGION",
+          "awslogs-region": "REGION",
           "awslogs-stream-prefix": "ecs"
         }
       }

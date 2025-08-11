@@ -1,14 +1,14 @@
 [
   {
     "ParameterKey": "VpcId",
-    "ParameterValue": "vpc-0d0d50dd9874861fd"
+    "ParameterValue": "vpc-default"
   },
   {
     "ParameterKey": "SubnetIds",
-    "ParameterValue": "subnet-0f5117f3d913a3f24,subnet-031621fca876e52c7"
+    "ParameterValue": "subnet-1,subnet-2"
   },
   {
     "ParameterKey": "ImageUri",
-    "ParameterValue": "965990104809.dkr.ecr.us-east-2.amazonaws.com/ecs-bluegreen-demo:v1.0"
+    "ParameterValue": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/ecs-bluegreen-demo:v1.0"
   }
 ]

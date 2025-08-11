@@ -1,17 +1,20 @@
 #!/bin/bash
 
 # ECS Native Blue/Green Deployment Script
-# Usage: ./deploy.sh <stack-name> <region> <account-id>
+# Usage: ./deploy.sh <stack-name> <region>
 
 set -e
 
 STACK_NAME=${1:-ecs-bluegreen-demo}
 REGION=${2:-us-east-2}
-ACCOUNT_ID=${3}
+
+# Get AWS account ID from current AWS credentials
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
 if [ -z "$ACCOUNT_ID" ]; then
-    echo "Usage: $0 <stack-name> <region> <account-id>"
-    echo "Example: $0 ecs-bluegreen-demo us-east-2 123456789012"
+    echo "❌ Error: Unable to get AWS Account ID. Please check your AWS credentials."
+    echo "Run: aws configure"
+    echo "Or set: AWS_PROFILE=your-profile"
     exit 1
 fi
 

@@ -6,16 +6,43 @@
 
 Zero-downtime deployments with AWS ECS Native Blue/Green strategy and automated validation hooks.
 
+## 🔧 Prerequisites
+
+### AWS Credentials Setup
+Before starting, configure your AWS credentials:
+
+```bash
+# Option 1: Configure default profile
+aws configure
+
+# Option 2: Use specific profile
+export AWS_PROFILE=your-profile-name
+
+# Option 3: Use environment variables
+export AWS_ACCESS_KEY_ID=your-access-key
+export AWS_SECRET_ACCESS_KEY=your-secret-key
+export AWS_DEFAULT_REGION=us-east-2
+```
+
+### Required Permissions
+Your AWS user/role needs:
+- ECS Full Access
+- EC2 Full Access  
+- IAM Role Creation
+- Lambda Function Management
+- CloudFormation Stack Management
+- ECR Repository Management
+
 ## 🚀 Quick Start
 
 ```bash
 # Clone and deploy
 git clone https://github.com/JEETDAGAR/ECSNativeBlue-Green.git
 cd ECSNativeBlue-Green
-./scripts/deploy.sh ecs-bluegreen-demo us-east-2 YOUR_ACCOUNT_ID
+./scripts/deploy.sh ecs-bluegreen-demo us-east-2
 
 # Test Blue/Green deployment
-./scripts/test-deployment.sh ecs-bluegreen-demo us-east-2 YOUR_ACCOUNT_ID v2.0 Green
+./scripts/test-deployment.sh ecs-bluegreen-demo us-east-2 v2.0 Green
 ```
 
 ## 📁 Repository Structure

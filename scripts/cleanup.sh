@@ -8,9 +8,20 @@ set -e
 STACK_NAME=${1:-ecs-bluegreen-demo}
 REGION=${2:-us-east-2}
 
+# Get AWS account ID from current AWS credentials
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+if [ -z "$ACCOUNT_ID" ]; then
+    echo "❌ Error: Unable to get AWS Account ID. Please check your AWS credentials."
+    echo "Run: aws configure"
+    echo "Or set: AWS_PROFILE=your-profile"
+    exit 1
+fi
+
 echo "🧹 Cleaning up ECS Native Blue/Green Deployment"
 echo "Stack Name: $STACK_NAME"
 echo "Region: $REGION"
+echo "Account ID: $ACCOUNT_ID"
 
 # Step 1: Get cluster and service names
 CLUSTER_NAME=$(aws cloudformation describe-stacks --region $REGION --stack-name $STACK_NAME --query 'Stacks[0].Outputs[?OutputKey==`ClusterName`].OutputValue' --output text 2>/dev/null || echo "")

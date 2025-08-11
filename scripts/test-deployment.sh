@@ -1,19 +1,22 @@
 #!/bin/bash
 
 # Test Blue/Green Deployment Script
-# Usage: ./test-deployment.sh <stack-name> <region> <account-id> <new-version> <environment>
+# Usage: ./test-deployment.sh <stack-name> <region> [new-version] [environment]
 
 set -e
 
 STACK_NAME=${1:-ecs-bluegreen-demo}
 REGION=${2:-us-east-2}
-ACCOUNT_ID=${3}
-NEW_VERSION=${4:-v2.0}
-ENVIRONMENT=${5:-Green}
+NEW_VERSION=${3:-v2.0}
+ENVIRONMENT=${4:-Green}
+
+# Get AWS account ID from current AWS credentials
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
 if [ -z "$ACCOUNT_ID" ]; then
-    echo "Usage: $0 <stack-name> <region> <account-id> [new-version] [environment]"
-    echo "Example: $0 ecs-bluegreen-demo us-east-2 123456789012 v2.0 Green"
+    echo "❌ Error: Unable to get AWS Account ID. Please check your AWS credentials."
+    echo "Run: aws configure"
+    echo "Or set: AWS_PROFILE=your-profile"
     exit 1
 fi
 
@@ -22,6 +25,7 @@ echo "Stack Name: $STACK_NAME"
 echo "Region: $REGION"
 echo "New Version: $NEW_VERSION"
 echo "Environment: $ENVIRONMENT"
+echo "Account ID: $ACCOUNT_ID"
 
 # Get cluster name
 CLUSTER_NAME=$(aws cloudformation describe-stacks --region $REGION --stack-name $STACK_NAME --query 'Stacks[0].Outputs[?OutputKey==`ClusterName`].OutputValue' --output text)

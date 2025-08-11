@@ -113,19 +113,84 @@ Resources:
       Code:
         ZipFile: |
           import json
+          import urllib3
           import logging
+          import os
+          import time
           
           logger = logging.getLogger()
           logger.setLevel(logging.INFO)
+          http = urllib3.PoolManager()
           
           def lambda_handler(event, context):
               logger.info("=== ECS Deployment Lifecycle Hook Triggered ===")
               logger.info(f"Event: {json.dumps(event, default=str)}")
               
-              # Simple hook that always succeeds to avoid blocking deployments
-              # In production, you would add your validation logic here
+              try:
+                  # Get the lifecycle stage
+                  lifecycle_stage = event.get('lifecycleStage', 'UNKNOWN')
+                  logger.info(f"Lifecycle stage: {lifecycle_stage}")
+                  
+                  if lifecycle_stage == 'POST_TEST_TRAFFIC_SHIFT':
+                      return validate_green_environment()
+                  elif lifecycle_stage == 'PRODUCTION_TRAFFIC_SHIFT':
+                      return validate_production_switch()
+                  else:
+                      logger.info(f"No specific validation for stage: {lifecycle_stage}")
+                      return {"hookStatus": "SUCCEEDED"}
+                      
+              except Exception as error:
+                  logger.error(f"Hook error: {str(error)}")
+                  return {"hookStatus": "FAILED"}
+          
+          def validate_green_environment():
+              """Validate the Green environment via test traffic"""
+              logger.info("=== Validating Green Environment ===")
               
-              logger.info("✅ Lifecycle hook validation passed")
+              test_endpoint = os.getenv('TEST_ENDPOINT_URL')
+              if not test_endpoint:
+                  logger.error("TEST_ENDPOINT_URL not configured")
+                  return {"hookStatus": "FAILED"}
+              
+              logger.info(f"Testing Green environment at: {test_endpoint}")
+              
+              # Retry validation with backoff
+              for attempt in range(3):
+                  try:
+                      logger.info(f"Validation attempt {attempt + 1}/3")
+                      
+                      # Test health endpoint
+                      health_response = http.request('GET', f"{test_endpoint}/health", timeout=30)
+                      logger.info(f"Health check status: {health_response.status}")
+                      
+                      if health_response.status == 200:
+                          # Test main application
+                          app_response = http.request('GET', test_endpoint, timeout=30)
+                          logger.info(f"App response status: {app_response.status}")
+                          
+                          if app_response.status == 200:
+                              logger.info("✅ Green environment validation successful")
+                              return {"hookStatus": "SUCCEEDED"}
+                      
+                      if attempt < 2:
+                          logger.info("Retrying in 15 seconds...")
+                          time.sleep(15)
+                          
+                  except Exception as e:
+                      logger.warning(f"Validation attempt {attempt + 1} failed: {str(e)}")
+                      if attempt < 2:
+                          time.sleep(15)
+              
+              logger.error("❌ Green environment validation failed")
+              return {"hookStatus": "FAILED"}
+          
+          def validate_production_switch():
+              """Validate that production traffic switch is ready"""
+              logger.info("=== Validating Production Traffic Switch ===")
+              
+              # For production switch, we just ensure the previous validation passed
+              # The actual traffic switching is handled by ECS
+              logger.info("✅ Ready for production traffic switch")
               return {"hookStatus": "SUCCEEDED"}
 
   # Lambda Permission for ECS
@@ -237,18 +302,13 @@ Resources:
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
 
-  # Listeners
+  # Listeners - Fixed for proper Blue/Green
   ProductionListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       DefaultActions:
         - Type: forward
-          ForwardConfig:
-            TargetGroups:
-              - TargetGroupArn: !Ref BlueTargetGroup
-                Weight: 100
-              - TargetGroupArn: !Ref GreenTargetGroup
-                Weight: 0
+          TargetGroupArn: !Ref BlueTargetGroup  # Initially route to Blue
       LoadBalancerArn: !Ref ApplicationLoadBalancer
       Port: 80
       Protocol: HTTP
@@ -258,23 +318,18 @@ Resources:
     Properties:
       DefaultActions:
         - Type: forward
-          TargetGroupArn: !Ref GreenTargetGroup
+          TargetGroupArn: !Ref GreenTargetGroup  # Test traffic always goes to Green
       LoadBalancerArn: !Ref ApplicationLoadBalancer
       Port: 8080
       Protocol: HTTP
 
-  # Listener Rules for Blue/Green
+  # Listener Rules for Blue/Green - Fixed
   ProductionListenerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
       Actions:
         - Type: forward
-          ForwardConfig:
-            TargetGroups:
-              - TargetGroupArn: !Ref BlueTargetGroup
-                Weight: 100
-              - TargetGroupArn: !Ref GreenTargetGroup
-                Weight: 0
+          TargetGroupArn: !Ref BlueTargetGroup  # Initially Blue gets production traffic
       Conditions:
         - Field: path-pattern
           Values: ["/*"]
@@ -286,7 +341,7 @@ Resources:
     Properties:
       Actions:
         - Type: forward
-          TargetGroupArn: !Ref GreenTargetGroup
+          TargetGroupArn: !Ref GreenTargetGroup  # Green gets test traffic
       Conditions:
         - Field: path-pattern
           Values: ["/*"]

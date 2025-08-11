@@ -46,14 +46,20 @@ ECSNativeBlue-Green/
 
 ```
 Application Load Balancer
-├── Port 80 (Production) → Blue Target Group → Old Version (v1.0)
-└── Port 8080 (Test)     → Green Target Group → New Version (v2.0)
+├── Port 80 (Production) → Blue Target Group → Blue Tasks (container port 80)
+└── Port 8080 (Test)     → Green Target Group → Green Tasks (container port 80)
 ```
 
-**Key Point:** During deployment, **both environments run simultaneously**:
-- **Production traffic** continues on the old version (zero downtime)
-- **Test traffic** routes to the new version for validation
-- **After validation passes**, production traffic switches to the new version
+**Key Points:**
+- **All tasks listen on container port 80** (same for Blue and Green)
+- **ALB Port 80**: Production traffic (switches between Blue/Green target groups)
+- **ALB Port 8080**: Test traffic (routes to new target group during deployment)
+- **After deployment**: ALB Port 80 switches to serve Green tasks on container port 80
+
+**During deployment, both environments run simultaneously:**
+- **Production traffic (ALB port 80)** continues on the old version (zero downtime)
+- **Test traffic (ALB port 8080)** routes to the new version for validation
+- **After validation passes**, ALB port 80 switches to route to the new target group
 
 ## 🔧 Key Features
 
@@ -129,16 +135,16 @@ aws logs tail /aws/lambda/ecs-bluegreen-demo-lifecycle-hook --region us-east-2 -
 ### **The Magic of Blue/Green Deployments:**
 
 1. **Before Deployment:**
-   - Port 80: Blue environment (v1.0) ← All production traffic
-   - Port 8080: Not used
+   - ALB Port 80: Blue target group → Blue tasks (container port 80) ← All production traffic
+   - ALB Port 8080: Not used
 
 2. **During Deployment:**
-   - Port 80: Blue environment (v1.0) ← Production traffic continues (zero downtime!)
-   - Port 8080: Green environment (v2.0) ← New version being tested
+   - ALB Port 80: Blue target group → Blue tasks (container port 80) ← Production traffic continues (zero downtime!)
+   - ALB Port 8080: Green target group → Green tasks (container port 80) ← New version being tested
 
 3. **After Successful Deployment:**
-   - Port 80: Green environment (v2.0) ← Production traffic switched
-   - Port 8080: Green environment (v2.0) ← Test port also updated
+   - ALB Port 80: Green target group → Green tasks (container port 80) ← Production traffic switched!
+   - ALB Port 8080: Green target group → Green tasks (container port 80) ← Test port also updated
 
 ### **Real Example:**
 ```bash
@@ -146,10 +152,14 @@ aws logs tail /aws/lambda/ecs-bluegreen-demo-lifecycle-hook --region us-east-2 -
 ./scripts/test-deployment.sh ecs-bluegreen-demo us-east-2 123456789 v2.0 Green
 
 # During deployment, you can see both versions running:
-curl http://my-alb.amazonaws.com      # Returns: "Blue Environment v1.0"
-curl http://my-alb.amazonaws.com:8080 # Returns: "Green Environment v2.0"
+curl http://my-alb.amazonaws.com      # Returns: "Blue Environment v1.0" (ALB port 80 → Blue tasks)
+curl http://my-alb.amazonaws.com:8080 # Returns: "Green Environment v2.0" (ALB port 8080 → Green tasks)
 
-# This proves zero-downtime: production never stops!
+# After deployment:
+curl http://my-alb.amazonaws.com      # Returns: "Green Environment v2.0" (ALB port 80 → Green tasks)
+curl http://my-alb.amazonaws.com:8080 # Returns: "Green Environment v2.0" (ALB port 8080 → Green tasks)
+
+# This proves zero-downtime: production never stops, just switches target groups!
 ```
 
 ## 🔄 How Does ALB Switch Traffic?
